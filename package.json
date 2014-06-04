@@ -1,0 +1,19 @@
+{
+  "name": "transform-runner",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Mikito Takada <mikito.takada@gmail.com> (http://mixu.net/)",
+  "license": "BSD",
+  "dependencies": {
+    "browser-resolve": "^1.2.4",
+    "detective": "^3.1.0",
+    "microee": "0.0.5",
+    "minilog": "^2.0.5",
+    "miniq": "0.0.1",
+    "resolve": "^0.7.0"
+  }
+}
