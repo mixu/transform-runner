@@ -9,11 +9,11 @@
   "author": "Mikito Takada <mikito.takada@gmail.com> (http://mixu.net/)",
   "license": "BSD",
   "dependencies": {
-    "browser-resolve": "^1.2.4",
-    "detective": "^3.1.0",
+    "browser-resolve": "~1.2.4",
+    "detective": "~3.1.0",
+    "file-dedupe": "0.0.3",
     "microee": "0.0.5",
-    "minilog": "^2.0.5",
-    "miniq": "0.0.1",
-    "resolve": "^0.7.0"
+    "miniq": "0.1.1",
+    "resolve": "~0.7.1"
   }
 }
