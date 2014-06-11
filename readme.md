@@ -62,3 +62,15 @@ Accepts a set of files, applies transformations to them and returns JSON output 
   - `.log()`: log a informational message
   - `.error()`: log a error message
 
+## Include, exclude etc.
+
+Unlike most build systems, `transform-runner` does not use `node-glob` because it is slow on moderately-sized trees.
+
+All path specifications are resolved as follows:
+
+- paths beginning with `.` or `/` are resolved against the file system. Relative paths are resolved based on the base path.
+- `--include-regexp`, `--exclude-regexp` and `--ignore-regexp` values are parsed as regular expressions using `new RegExp`. They should be quoted if passed in through the command line to avoid the shell from expanding special characters.
+- There are three kinds of specifications:
+  - includes are resolved first to produce a set of initial files
+  - excludes are applied against any matching files, matched files are excluded
+  - actions are resolved against the result from the includes after applying exclusions.
