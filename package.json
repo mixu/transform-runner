@@ -19,7 +19,7 @@
     "detective": "~3.1.0",
     "file-dedupe": "0.0.5",
     "microee": "0.0.5",
-    "miniq": "0.1.1",
+    "miniq": "~0.1.2",
     "resolve": "~0.7.1"
   }
 }
