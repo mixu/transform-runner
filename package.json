@@ -1,7 +1,7 @@
 {
   "name": "transform-runner",
   "version": "0.1.0",
-  "description": "",
+  "description": "Accepts a set of files, applies transformations to them and returns JSON output which can be converted into a package.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -13,7 +13,7 @@
     "amdetective": "0.0.2",
     "browser-resolve": "~1.3.0",
     "detective": "~3.1.0",
-    "file-dedupe": "0.0.4",
+    "file-dedupe": "0.0.5",
     "microee": "0.0.5",
     "miniq": "0.1.1",
     "resolve": "~0.7.1"
