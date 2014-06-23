@@ -1,6 +1,6 @@
 {
   "name": "transform-runner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Accepts a set of files, applies transformations to them and returns JSON output which can be converted into a package.",
   "main": "index.js",
   "scripts": {
