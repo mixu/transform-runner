@@ -8,6 +8,10 @@
   },
   "author": "Mikito Takada <mikito.takada@gmail.com> (http://mixu.net/)",
   "license": "BSD",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/mixu/transform-runner.git"
+  },
   "dependencies": {
     "amd-resolve": "~0.1.1",
     "amdetective": "0.0.2",
