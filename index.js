@@ -14,7 +14,7 @@ module.exports = function(opts) {
         });
     paths.map(function(filepath) {
       // console.log('rd', item);
-      var stat = fs.statSync(filepath);
+      var stat = fs.lstatSync(filepath);
       if (stat.isDirectory()) {
         // Skip `node_modules` folders when they occur in the subdirectories of
         // the initial set of includes
