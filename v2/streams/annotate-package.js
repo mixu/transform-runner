@@ -25,10 +25,16 @@ var nodeModules = new RegExp(path.sep + 'node_modules' + path.sep);
 
 
 module.exports = function(mains) {
+  if (!mains) {
+    mains = [];
+  }
+  if (!Array.isArray(mains)) {
+    mains = [mains];
+  }
 
   // ensure that mainpaths end with / so substr splicing doesn't
   // just cut a filename prefix in half
-  mainPaths = (mains || []).map(function(str) {
+  var mainPaths = mains.map(function(str) {
     return (str.charAt(str.length - 1) === path.sep ? str : str + path.sep);
   });
 

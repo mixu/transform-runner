@@ -1,3 +1,7 @@
+var path = require('path'),
+    pi = require('pipe-iterators'),
+    spawn = require('./spawn.js');
+
 function asArray(item) {
   return (Array.isArray(item) ? item : [ item ]);
 }
@@ -42,34 +46,44 @@ function transformsToTasks(transforms, directories) {
   // resolve each transform
   transforms.forEach(function(transform) {
     var nodeResolve = require('resolve'),
-        modulePath, mod;
+        name = transform,
+        modulePath, mod, err;
 
+    // handle 2-length arrays as [modulename, argumentHash]
+    if (Array.isArray(transform)) {
+      name = transform[0];
+    }
 
-
-    try {
-      modulePath = nodeResolve.sync(transform, { basedir:  });
-      mod = require(modulePath);
-    } catch (e) {
+    directories.some(function(dir) {
       try {
-        modulePath = nodeResolve.sync(transform, { basedir:  });
+        modulePath = nodeResolve.sync(name, { basedir: dir });
         mod = require(modulePath);
-      } catch (e2) {
-        throw e; // throw the friendlier error
+      } catch (e) {
+        err = e;
+        return false;
       }
+      return true;
+    });
+
+    if (!mod && err) {
+      throw err;
     }
 
     // the only difference between a 2.x gluejs module
     // and a browserify module is that gluejs modules can return false
     // -> and gluejs 2.x modules might return Minitask tasks, but that's deprecated in 3.x
     // -> and gluejs 2.x modules had function(filename, package) { } as the sig
-
-    result.push(mod);
+    if (!Array.isArray(transform)) {
+      result.push(mod);
+    } else {
+      result.push([ mod, transform[1] ]);
+    }
   });
   return result;
 }
 
 module.exports = function(opts) {
-  return commandsToTasks(asArray(opts.commands))
+  return commandsToTasks(asArray(opts.command))
          .concat(transformsToTasks(asArray(opts.transforms), opts.moduleLookupPaths))
          .concat(commandsToTasks(asArray(opts['global-command'])))
          .concat(transformsToTasks(asArray(opts['global-transform']), opts.moduleLookupPaths))

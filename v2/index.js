@@ -1,4 +1,5 @@
 var fs = require('fs'),
+    os = require('os'),
     path = require('path'),
     pi = require('pipe-iterators'),
     Dedupe = require('file-dedupe');
@@ -12,8 +13,8 @@ var filters = require('./streams/filters.js'),
 // end v2 deps
 
 
-var checkOptions = require('./check-options.js'),
-    detectiveDependencies = require('./detective-dependencies.js');
+var checkOptions = require('../lib/check-options.js'),
+    detectiveDependencies = require('../lib/detective-dependencies.js');
 
 module.exports = function(opts) {
   checkOptions('Runner', opts, {
@@ -22,8 +23,8 @@ module.exports = function(opts) {
       jobs: 'Int, number of parallel jobs to run'
     },
     optional: {
+      command: 'Command str',
       cache: 'Instance of minitask.cache',
-      tasks: 'Function for getting tasks',
       log: 'logger instance',
       exclude: 'Array of strings to be matched against files (converted to file / dir regexps)',
       ignore: 'Array of strings to be matched against files (converted to file / dir regexps) ' +
@@ -35,7 +36,7 @@ module.exports = function(opts) {
   });
 
   // cache
-  var cachePath = (require('os').tmpDir ? require('os').tmpDir(): require('os').tmpdir()),
+  var cachePath = (os.tmpDir ? os.tmpDir(): os.tmpdir()),
       cacheLookup = {};
   var cache = (opts.cache ? opts.cache : {
     get: function(filename, key, isPath) {
@@ -166,7 +167,7 @@ module.exports = function(opts) {
         // the "browser" and "browserify.transform" fields
         // are applied at a package level - hence we need to annotate
         // files with their current package
-        annotatePackage(),
+        annotatePackage(opts.include),
         // this fetches the "browser" field information for dep processing
         getPackageTransforms({
           // the input to this transform is the set of main scoped commands, transforms etc.
@@ -178,38 +179,39 @@ module.exports = function(opts) {
           // try from current directory (e.g. global modules)
           moduleLookupPaths: [ process.cwd(), __dirname ]
         }),
-        // make tasks
-        toBuildTask(taskFn, cache)
+        // make tasks - which includes resolving deps and dealing with --ignore, --remap etc
+        toBuildTask({
+          cache: cache,
+          detective: detective
+        })
       ])
     ),
     // - run each task
     //    - xforms are fns that return thru streams
     //    - commands are child process invocations wrapped as streams
 
-    pi.queue(opts.jobs, function(task, enc, done) {
+    pi.parallel(opts.jobs, function(task, enc, done) {
       var stream = this;
       task.call(this, function(err, result) {
-
         // do not store result when an error occurs
         if (!err) {
-          // self.log.info('Cache parse result:', filename);
+          // self.log.info('Cache parse result:', result.filename);
           // store the dependencies
-          self.cache.set(filename, 'deps', deps);
+          cache.set(result.filename, 'deps', result.deps);
           // store the renamed dependencies
-          self.cache.set(filename, 'renames', renames);
+          cache.set(result.filename, 'renames', result.renames);
 
-          cache.set(filename, 'cacheFile', content, true);
+          cache.set(result.filename, 'cacheFile', result.content, true);
 
         } else {
-          self.log.info('Skipping cache due to errors:', filename, err);
+          log.info('Skipping cache due to errors:', result.filename, err);
           (Array.isArray(err) ? err : [ err ]).forEach(function(err) {
-            self.emit('parse-error', err);
+            stream.emit('parse-error', err);
           });
         }
-        self.emit('miss', filename);
+        stream.emit('miss', result.filename);
 
         if (result) {
-
 
           // - queue dependencies for processing
           stream.push(result);
@@ -226,7 +228,9 @@ module.exports = function(opts) {
             first.write(dep);
           });
         }
-        done(err);
+        // there is still a race condition: if first writes do not reach the task queue
+        // before the function is considered done, then queue will be empty...
+        setTimeout(function() { done(err); }, 10);
       });
     }).on('empty', function() {
       // the queue is empty. This can only happen if 1) every task has run and 2)
@@ -241,7 +245,7 @@ module.exports = function(opts) {
     pi.reduce(function(acc, entry) { acc.push(entry); return acc; }, []),
 
     canonicalize(dedupe)
-  ];
+  ]);
 
   return pi.combine(
     // write into a disposable stream to avoid prematurely closing the processing pipeline

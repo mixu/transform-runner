@@ -30,18 +30,14 @@ module.exports = function(options) {
   var stderr = '',
       stdout = '';
 
-  task.stdout.on('data', function(data) {
-    stdout += data;
-  });
-
-  task.stderr.on('data', function(data) {
-    stderr += data;
-  });
+  // DO NOT attach .on('data') handlers before the first .pipe -
+  // the child process will switch to flowing mode before the pipeline uses it, and
+  // hence the output is lost for commands that terminate immediately e.g. bash -c echo
 
   // The child_process API only emits errors when invoking the task fails.
   // To more closely match normal streams, listen for "exit" with exit status != 0 and emit
   // a error.
-  task.on('exit', function(code) {
+  task.once('exit', function(code) {
     if (code !== 0) {
       console.log('');
       console.log('gluejs - An error occured while executing: "' + options.task.join(' ') + '"');
@@ -49,11 +45,6 @@ module.exports = function(options) {
       console.log('Exit code: ' + code);
       console.log('Check the input file for syntax errors or other issues that could cause ' +
         'the child process above to fail.');
-      console.log();
-      console.log('Standard output from child process:');
-      console.log(stdout);
-      console.log('Standard error output from child process:');
-      console.log(stderr);
       task.emit('error', new Error('Child process exited with nonzero exit code: ' + code));
     }
     stderr = '';

@@ -30,16 +30,19 @@ module.exports = function(opts) {
         return done(null, { filename: filename, content: filename, deps: {}, renames: []});
       }
 
-      var tasks;
-      if (getTasks) {
-        tasks = getTasks(filename);
-      }
+      var tasks = item.tasks;
 
       if (tasks && tasks.length > 0) {
         // generate new filename
         var cacheFile = cache.filepath();
+
+        // initialize tasks (function(filename) { } -> stream
+        var streams = tasks.map(function(task) {
+          return task(filename);
+        }).filter(Boolean);
+
         fs.createReadStream(filename)
-          .pipe(tasks)
+          .pipe(pi.pipeline(streams))
           // reduce to single string
           .pipe(pi.reduce(function(acc, chunk) { return acc += chunk; }, ''))
           .pipe(pi.forEach(function(content) {

@@ -1,4 +1,5 @@
 var fs = require('fs'),
+    path = require('path'),
     pi = require('pipe-iterators'),
     optsToTaskArr = require('../lib/opts-to-task-arr.js');
 

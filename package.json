@@ -25,6 +25,7 @@
     "resolve": "~0.7.1"
   },
   "devDependencies": {
+    "assert-diff": "~1.0.1",
     "wildglob": "0.0.1"
   }
 }
