@@ -39,6 +39,33 @@ describe('to-build-task wrapper tests', function() {
     return taskMatchers.map(function(matcher) { return matcher(filename); } ).filter(Boolean);
   }
 
+  function run(dir, onDone) {
+    glob.stream(dir + '/**')
+        .pipe(pi.filter(function(filename) {
+          var stat = fs.statSync(filename);
+          return stat.isFile();
+        }))
+        .pipe(annotatePackage([dir]))
+//        .pipe(getPackageReplace())
+        .pipe(toBuildTask({
+          getTasks: function() { return []; },
+          cache: { filename: function() { return basedir + '/tempfile'; } },
+          detective: require('../../lib/detective-dependencies.js'),
+          log: console,
+          ignore: [],
+          'resolver-opts': {}
+        }))
+        // simplified task runner, no caching, no dep queueing
+        .pipe(pi.parallel(1, function(task, enc, done) {
+          var stream = this;
+          task.call(this, function(err, result) {
+            if (err) { throw err; }
+            stream.push(result);
+            done();
+          });
+        }))
+        .pipe(pi.toArray(onDone));
+  }
 
   it('it accepts a filename and returns a task that returns a result', function(done) {
     var basedir = fixture.dir({

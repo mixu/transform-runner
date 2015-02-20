@@ -17,7 +17,8 @@ module.exports = function(opts) {
       opts['resolver-opts'] || { }, log, onDone);
   }
 
-  return pi.map(function(filename) {
+  return pi.map(function(item) {
+    var filename = item.filename;
     // - get tasks
     var self = this;
 
@@ -29,7 +30,7 @@ module.exports = function(opts) {
         return done(null, { filename: filename, content: filename, deps: {}, renames: []});
       }
 
-      var tasks = ( null);
+      var tasks;
       if (getTasks) {
         tasks = getTasks(filename);
       }

@@ -9,18 +9,36 @@ var nodeModules = new RegExp(path.sep + 'node_modules' + path.sep);
 // package name (root dir of package)
 // isMain (use cmd line options for --transform / command / remap)
 
+// Input:
+// - mains is an array of --include target directories
+// - stream of filenames
+// Output:
+// { filename: filename,
+//   isMain:
+//      - true for all files that are in the main package
+//      - false for all files that are in other node modules (need to apply package.json/browserify)
+//   package:
+//      - null for root package
+//      - path to dir root for packages that consist of multiple files
+//      - path to file for single-file packages
+//   packageJson: path to the package.json associated with the file
+
+
 module.exports = function(mains) {
 
   // ensure that mainpaths end with / so substr splicing doesn't
   // just cut a filename prefix in half
-  mainPaths = mains.map(function(str) {
+  mainPaths = (mains || []).map(function(str) {
     return (str.charAt(str.length - 1) === path.sep ? str : str + path.sep);
   });
 
   var packageJsonCache = {};
   function packageJsonExists(location) {
     if (typeof packageJsonCache[location] !== 'boolean') {
-      packageJsonCache[location] = (fs.statSync(location) == true);
+      packageJsonCache[location] = false;
+      try {
+        packageJsonCache[location] = fs.statSync(location).isFile();
+      } catch (e) {}
     }
     return packageJsonCache[location];
   }
@@ -31,8 +49,8 @@ module.exports = function(mains) {
       // - does the beginning match one of the main paths?
       if (filename.substr(0, p.length) == p) {
         // - is there no node_modules between the main path and the
-        // current path?
-        return !filename.substr(p.length).test(nodeModules);
+        // current path? (len - 1 to include first /)
+        return !nodeModules.test(filename.substr(p.length - 1));
       }
       return false;
     });
@@ -71,7 +89,7 @@ module.exports = function(mains) {
 
     // found node_modules? find package.json at the node_modules level (only)
     if (segments[i] == 'node_modules') {
-      var packageRoot = segments.slice(0, i + 1).join(path.sep),
+      var packageRoot = segments.slice(0, i + 2).join(path.sep),
           packageJson = packageRoot + path.sep + 'package.json';
       return {
         filename: filename,

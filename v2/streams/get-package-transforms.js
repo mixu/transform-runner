@@ -28,13 +28,14 @@ module.exports = function(opts) {
         json = JSON.parse(fs.readFileSync(entry['package.json']).toString());
       } catch(err) {
         // ignore enoent, avoids checking for existence
-        if (err.code === 'ENOENT') { continue; }
-        self.emit('warn', err);
+        if (err.code !== 'ENOENT') {
+          self.emit('warn', err);
+        }
       }
-
       if (json && json.browserify && json.browserify.transform) {
         cache[entry['package.json']] = optsToTaskArr({
-          transform: json.browserify.transform
+          transforms: json.browserify.transform,
+          moduleLookupPaths: [ path.dirname(entry.filename) ]
         });
       } else {
         cache[entry['package.json']] = [];

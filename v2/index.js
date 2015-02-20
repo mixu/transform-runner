@@ -168,7 +168,16 @@ module.exports = function(opts) {
         // files with their current package
         annotatePackage(),
         // this fetches the "browser" field information for dep processing
-        getPackageReplace(),
+        getPackageTransforms({
+          // the input to this transform is the set of main scoped commands, transforms etc.
+          command: opts.command,
+          'global-command': opts['global-command'],
+          transform: opts.transform,
+          'global-transform': opts['global-transform'],
+          // try from process.cwd()
+          // try from current directory (e.g. global modules)
+          moduleLookupPaths: [ process.cwd(), __dirname ]
+        }),
         // make tasks
         toBuildTask(taskFn, cache)
       ])
@@ -176,6 +185,7 @@ module.exports = function(opts) {
     // - run each task
     //    - xforms are fns that return thru streams
     //    - commands are child process invocations wrapped as streams
+
     pi.queue(opts.jobs, function(task, enc, done) {
       var stream = this;
       task.call(this, function(err, result) {

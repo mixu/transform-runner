@@ -3,6 +3,7 @@ function asArray(item) {
 }
 
 function commandsToTasks(commands) {
+  commands = commands.filter(Boolean);
   if (!commands) { return []; }
 
   var result,
@@ -33,7 +34,8 @@ function commandsToTasks(commands) {
   return result;
 }
 
-function transformsToTasks(transforms) {
+function transformsToTasks(transforms, directories) {
+  transforms = transforms.filter(Boolean);
   if (!transforms) { return []; }
   var result = [];
 
@@ -42,14 +44,14 @@ function transformsToTasks(transforms) {
     var nodeResolve = require('resolve'),
         modulePath, mod;
 
-    // try from process.cwd()
+
+
     try {
-      modulePath = nodeResolve.sync(transform, { basedir: process.cwd() });
+      modulePath = nodeResolve.sync(transform, { basedir:  });
       mod = require(modulePath);
     } catch (e) {
-      // try from current directory (e.g. global modules)
       try {
-        modulePath = nodeResolve.sync(transform, { basedir: __dirname });
+        modulePath = nodeResolve.sync(transform, { basedir:  });
         mod = require(modulePath);
       } catch (e2) {
         throw e; // throw the friendlier error
@@ -68,8 +70,8 @@ function transformsToTasks(transforms) {
 
 module.exports = function(opts) {
   return commandsToTasks(asArray(opts.commands))
-         .concat(transformsToTasks(asArray(opts.transforms)))
+         .concat(transformsToTasks(asArray(opts.transforms), opts.moduleLookupPaths))
          .concat(commandsToTasks(asArray(opts['global-command'])))
-         .concat(transformsToTasks(asArray(opts['global-transform'])))
+         .concat(transformsToTasks(asArray(opts['global-transform']), opts.moduleLookupPaths))
          .filter(Boolean);
 };

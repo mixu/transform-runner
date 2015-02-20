@@ -1,5 +1,5 @@
 var pi = require('pipe-iterators'),
-    Matcher = require('../lib/match.js');
+    Matcher = require('../../lib/match.js');
 
 // this is the list that's built into npm itself
 var npmBuiltIn = [

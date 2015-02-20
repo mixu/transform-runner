@@ -23,5 +23,8 @@
     "miniq": "^1.0.0",
     "pipe-iterators": "^1.1.0",
     "resolve": "~0.7.1"
+  },
+  "devDependencies": {
+    "wildglob": "0.0.1"
   }
 }
