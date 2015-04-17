@@ -14,43 +14,19 @@ function assertContainsArr(actual, expected) {
 
 describe('to-build-task wrapper tests', function() {
 
-  function stripBase(base) {
-    function strip(s) { return s.replace(base, ''); }
-    return pi.pipeline(
-      pi.thru.obj(function(task, enc, done) {
-        var self = this;
-        task(function(err, result) {
-          if (err) { self.emit('error', err); }
-          self.push(result);
-          done();
-        });
-      }),
-      pi.mapKey({
-        filename: strip,
-        content: strip,
-        deps: function(ob) {
-          Object.keys(ob).forEach(function(rawName) {
-            ob[rawName] = strip(ob[rawName]);
-          });
-          return ob;
-        }
-      }));
-  }
-
-
   it('it accepts a filename and returns a task that returns a result', function(done) {
     var base = fixture.dir({
       'aaaa.js': 'var a = require("b");',
       'node_modules/b.js': 'module.exports = "b"'
     });
 
-    pi.fromArray([ base + '/aaaa.js' ])
-      .pipe(run({
-        include: base,
+    run({
+        include: [ base + '/aaaa.js' ],
+        main: [ base ],
         jobs: 1,
         cache: false,
         log: console
-      })).pipe(pi.toArray(function(results) {
+      }).pipe(pi.toArray(function(results) {
         //console.log(require('util').inspect(results[0], null, 20, true));
         assert.deepEqual(results[0], [
           { filename: base + '/aaaa.js',
@@ -85,14 +61,14 @@ describe('to-build-task wrapper tests', function() {
       'b.js': 'module.exports = "b";'
     });
 
-    pi.fromArray([ base + '/a.js', base + '/b.js', ])
-      .pipe(run({
-        include: base,
+    run({
+        include: [ base + '/a.js', base + '/b.js', ],
+        main: [ base ],
         jobs: 1,
         cache: false,
         log: console,
         ignore: base + '/b.js'
-      })).pipe(pi.toArray(function(results) {
+      }).pipe(pi.toArray(function(results) {
         // console.log(require('util').inspect(results[0], null, 20, true));
         assert.deepEqual(results[0], [
            { filename: base + '/a.js',
@@ -110,15 +86,14 @@ describe('to-build-task wrapper tests', function() {
       'a.js': 'module.exports = "a";',
       '/node_modules/b/index.js': 'module.exports = "b";'
     });
-
-    pi.fromArray([ base + '/a.js', base + '/node_modules/b/index.js', ])
-      .pipe(run({
-        include: base,
+    run({
+        include: [ base + '/a.js', base + '/node_modules/b/index.js', ],
+        main: [ base ],
         jobs: 1,
         cache: false,
         log: console,
         ignore: base + '/node_modules/b/'
-      })).pipe(pi.toArray(function(results) {
+      }).pipe(pi.toArray(function(results) {
         // console.log(require('util').inspect(results[0], null, 20, true));
         assert.deepEqual(results[0], [
            { filename: base + '/a.js',
@@ -137,14 +112,14 @@ describe('to-build-task wrapper tests', function() {
     var base = fixture.dir({
       'a.js': 'module.exports = "a";'
     });
-    pi.fromArray([ base + '/a.js' ])
-      .pipe(run({
-        include: base,
+    run({
+        include: [ base + '/a.js' ],
+        main: [ base ],
         jobs: 1,
         cache: false,
         log: console,
         command: 'bash -c "echo \'module.exports = \"BAR\";\'"'
-      })).pipe(pi.toArray(function(results) {
+      }).pipe(pi.toArray(function(results) {
         // console.log(require('util').inspect(results[0], null, 20, true));
         assert.equal(results[0][0].filename, base + '/a.js');
         assert.equal(fs.readFileSync(results[0][0].content, 'utf8') ,'module.exports = "BAR";\n');
@@ -157,15 +132,15 @@ describe('to-build-task wrapper tests', function() {
       'a.js': 'module.exports = "a";',
       'other.js': 'module.exports = "OTHER";'
     });
-    pi.fromArray([ base + '/a.js' ])
-      .pipe(run({
-        include: base,
+      run({
+        include: [ base + '/a.js' ],
+        main: [ base ],
         jobs: 1,
         cache: false,
         log: console,
         command: 'bash -c "echo \'module.exports = require(\"./other\");\'"'
-      })).pipe(pi.toArray(function(results) {
         // console.log(require('util').inspect(results[0], null, 20, true));
+      }).pipe(pi.toArray(function(results) {
         assertContainsArr(results[0], [
           { filename: base + '/a.js',
             deps: { './other': '/tmp/rvlh27f1vyhqia4i/other.js' },

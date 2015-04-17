@@ -1,147 +1,141 @@
 var fs = require('fs'),
-    os = require('os'),
     path = require('path'),
     pi = require('pipe-iterators'),
-    Dedupe = require('file-dedupe');
+    Dedupe = require('file-dedupe'),
+    xtend = require('xtend'),
+    checkOptions = require('../lib/check-options.js');
 
 // v2 deps
-var filters = require('./streams/filters.js'),
+var filterExcluded = require('./streams/filter-excluded.js'),
+    filterIgnored = require('./streams/filter-ignored.js'),
+    filterSeen = require('./streams/filter-seen.js'),
     canonicalize = require('./streams/canonicalize.js'),
     toBuildTask = require('./streams/to-build-task.js'),
     annotatePackage = require('./streams/annotate-package.js'),
-    getPackageTransforms = require('./streams/get-package-transforms.js');
+    getPackageTransforms = require('./streams/get-package-transforms.js'),
+    InMemoryCache = require('./lib/in-memory-cache.js'),
+    isInCache = require('./lib/is-in-cache.js');
 // end v2 deps
 
+// detectives
 
-var checkOptions = require('../lib/check-options.js'),
-    detectiveDependencies = require('../lib/detective-dependencies.js');
+var Detective = require('./detective/commonjs.js'),
+    AMDetective = require('./detective/amd.js');
 
 module.exports = function(opts) {
   checkOptions('Runner', opts, {
     required: {
-      include: 'Array of files to process',
+
+      // include == array of paths to process
+      // main == array of paths considered to be main
+      // --> note that main paths must be dirs in current impl
+
+      include: 'Array of absolute globs to resolve. ' +
+               'Relative to absolute conversion is relegated to the caller. ',
+
+      ignore: 'Array of absolute globs. Any dependency matching an ignore expression will be ' +
+              'instead retargeted at the empty ignore file.',
+      remap: 'Array of absolute globs with targets. ' +
+             'Targets must be paths to files on disk: the caller must either write the necessary files, ' +
+             'or resolve the targets (dep => other file or dep => other module).',
       jobs: 'Int, number of parallel jobs to run'
     },
     optional: {
       command: 'Command str',
       cache: 'Instance of minitask.cache',
       log: 'logger instance',
-      exclude: 'Array of strings to be matched against files (converted to file / dir regexps)',
-      ignore: 'Array of strings to be matched against files (converted to file / dir regexps) ' +
-              'Ignore opts are also passed directly to the resolver as strings and any matching ' +
-              'dependency (user-facing) names are ignored when attempting to resolve dep targets.',
+      exclude: 'Array of absolute globs.',
       'resolver-opts': 'Options passed to the resolver',
       'amd': 'Whether to use the AMD resolver rather than the CommonJS resolver'
     }
   });
 
   // cache
-  var cachePath = (os.tmpDir ? os.tmpDir(): os.tmpdir()),
-      cacheLookup = {};
-  var cache = (opts.cache ? opts.cache : {
-    get: function(filename, key, isPath) {
-      return (cacheLookup[filename] ? cacheLookup[filename][key] : undefined);
-    },
-    set: function(filename, key, value, isPath) {
-      if(!cacheLookup[filename]) {
-        cacheLookup[filename] = {};
-      }
-      cacheLookup[filename][key] = value;
-    },
-    filepath: function() {
-      var cacheName;
-      // generate a new file name
-      do {
-        cacheName = cachePath + '/' + Math.random().toString(36).substring(2);
-      } while(fs.existsSync(cacheName));
-      return cacheName;
-    }
-  });
-
+  var cache = (opts.cache ? opts.cache : new InMemoryCache());
   var log = opts.log || console;
-  var resolverOpts = opts['resolver-opts'] || { };
-
-  // cache for detective-dependencies to avoid re-resolving known dependencies
-  var dependencyCache = {};
-
   var dedupe = new Dedupe();
 
+  // resolve args
+
+  // --include
+  var initial = includeToPaths(opts.include);
+  // --main
+  var isMain = isMain(opts.include);
+
+  // --exclude, --ignore, --remap: strings to globs
+  opts.exclude = opts.exclude.map(function(str) {
+    return minimatch.filter(str);
+  });
+  opts.ignore = opts.ignore.map(function(str) {
+    return minimatch.filter(str);
+  });
+  opts.remap.forEach(function(pair, i) {
+    opts.remap[i][0] = minimatch.filter(pair[0]);
+  });
+
+
+  // construct remap from --ignore and --remap: array of functions,
+  // each returns the canonical target
+  var remapExpressions = makeRemaps(opts.ignore, opts.remap);
+
   // allow users to set the detective mechanism
-  var detective = (opts['amd'] ? require('./amd-dependencies.js') : detectiveDependencies);
+  var detectiveOpts = xtend(
+        {
+          remap: remapExpressions,
+          log: opts.log
+        },
+        opts['resolver-opts'] || { }
+      ),
+      detective = (opts['amd'] ? new AMDetective(detectiveOpts) : new Detective(detectiveOpts));
 
   // --- end init ---
 
-  var inputEnded = false,
-      input = pi.writable.obj(function(filename, enc, done) {
-        // every initial entry into the head
-        function write() {
-          if (!firstWritable) {
-            first.once('drain', write);
-          } else {
-            firstWritable = first.write(filename);
-            done();
-          }
-        }
-        write();
-        // the first stream is only ended when the queue becomes empty (so you can just pipe here,
-        // but the pipe won't kill the pipeline's head before the queue is also empty)
-      }).once('finish', function() { inputEnded = true; }),
-      firstWritable = true,
-      first = pi.thru.obj().on('drain', function() {
-        firstWritable = true;
-      });
+  // How it works:
+  // - initial arguments are all processed
+  // - input path completion is tracked by notifying that an item is completed
+  // - completion:
+  //  - getting filtered out
+  //  - reaching the end of the pipeline
+  // - the pipeline is kept open until there are no pending tasks
 
-  var pipeline = [ first ]
-    .concat(filters({ exclude: opts.exclude, ignore: opts.ignore, basepath: opts.basepath, log: log }))
-    .concat([
+  var pending = 0,
+      complete = 0;
+
+  function completed(filename) {
+    pending--;
+    complete++;
+    if (pending === 0) {
+      input.end();
+    }
+  }
+
+
+  var input = pi.pipeline([
+
+    // filter out seen files to avoid reprocessing
+    filterSeen(completed),
+    // filter out excluded files (+ npm exclusions)
+    filterExcluded(opts.exclude, log, completed),
+    // filter out ignored files
+    filterIgnored(opts.ignore, log, completed),
+
     pi.matchMerge(
-      function(filename, index, done) {
-
-        function lookup(dupname, filename) {
-          // cached stuff:
-          // - an output file
-          var cacheFile = cache.get(dupname, 'cacheFile', true);
-          // - a set of renamed deps
-          var deps = cache.get(dupname, 'deps');
-          // - a set of unnormalized deps
-          var renames = cache.get(dupname, 'renames');
-
-          // the dep targets must also exist: otherwise, removing a file
-          // without updating the other files will cause a read error later on
-          // In particular, this occurs where ./foo.js becomes ./foo/index.js
-          // while the cache retains an entry for "./foo" => './foo.js'
-          // Using cache.get() helps a bit since the fs.stats calls are cached
-          var dependentFilesExist = deps && Object.keys(deps).every(function(key) {
-            var target = deps[key];
-            return !!cache.get(target, 'cacheFile', true);
-          });
-
-          if (!dependentFilesExist) {
-            return false;
-          }
-
-          // all items must exist in the cache for this to match
-          return (cacheFile && deps && renames);
-        }
-
-        // check the cache (sync)
-        if (lookup(filename, filename)) {
-          dedupe.find(filename, function() { done(null, true); });
-          return;
-        }
-        // check dedupe (async), and then check the cache (sync)
-        dedupe.find(filename, function(err, result) {
-          return done(null, (result ? lookup(result, filename) : false));
-        });
-      },
+      isInCache(cache, dedupe),
       pi.map(function(filename) {
         // the file exists in the cache:
         return function(done) {
-          var cacheFile = cache.get(dupname, 'cacheFile', true);
-          var deps = cache.get(dupname, 'deps');
-          var renames = cache.get(dupname, 'renames');
+          var cacheFile = cache.get(filename, 'cacheFile', true);
+          var deps = cache.get(filename, 'deps');
 
           /*
+
+          TODO:
+          - consider making these properties of the entry and doing all the emitting
+            from just one place
+          - also, make the emitting occur at the last stream so that one can
+            listen at the end of the pipeline for events relevant to reporting
+
+
           self.emit('file', filename);
           // caching should have the exact same effect as full exec
           // push the result and add deps
@@ -158,33 +152,45 @@ module.exports = function(opts) {
           done(null, {
             filename: filename,
             content: cacheFile,
-            deps: deps,
-            renames: renames
+            deps: deps
           });
         };
       }),
-      pi.pipeline([
-        // the "browser" and "browserify.transform" fields
-        // are applied at a package level - hence we need to annotate
-        // files with their current package
-        annotatePackage(opts.include),
-        // this fetches the "browser" field information for dep processing
-        getPackageTransforms({
-          // the input to this transform is the set of main scoped commands, transforms etc.
-          command: opts.command,
-          'global-command': opts['global-command'],
-          transform: opts.transform,
-          'global-transform': opts['global-transform'],
-          // try from process.cwd()
-          // try from current directory (e.g. global modules)
-          moduleLookupPaths: [ process.cwd(), __dirname ]
-        }),
-        // make tasks - which includes resolving deps and dealing with --ignore, --remap etc
-        toBuildTask({
-          cache: cache,
-          detective: detective
-        })
-      ])
+
+      // two different processing pipelines:
+      pi.pipeline((!opts['amd'] ?
+        // - commonjs
+        [
+          // Locate the package.json file for this file in order to read the
+          // the "browser" and "browserify.transform" fields.
+          annotatePackage(isMain),
+          // If the file is annotated as isMain, attach the main tasks to entry.tasks
+          // If the file is from another package and has a "browserify" field, apply the
+          // transforms in that field.
+          getPackageTransforms({
+            // the input to this transform is the set of main scoped commands, transforms etc.
+            command: opts.command,
+            'global-command': opts['global-command'],
+            transform: opts.transform,
+            'global-transform': opts['global-transform'],
+            // try from process.cwd()
+            // try from current directory (e.g. global modules)
+            moduleLookupPaths: [ process.cwd(), __dirname ]
+          }),
+          // make tasks - which includes resolving deps and dealing with --ignore, --remap etc
+          toBuildTask({
+            cache: cache,
+            detective: function(content, filepath, onDone) {
+              detective.resolveDeps(content, filepath, onDone);
+            }
+          })
+        ] :
+        // - amd
+        [
+          // execute plugins on files that contain an exclamation mark
+          addTasksForPluginFiles(opts.plugins)
+        ])
+      )
     ),
     // - run each task
     //    - xforms are fns that return thru streams
@@ -198,9 +204,6 @@ module.exports = function(opts) {
           // self.log.info('Cache parse result:', result.filename);
           // store the dependencies
           cache.set(result.filename, 'deps', result.deps);
-          // store the renamed dependencies
-          cache.set(result.filename, 'renames', result.renames);
-
           cache.set(result.filename, 'cacheFile', result.content, true);
 
         } else {
@@ -213,45 +216,68 @@ module.exports = function(opts) {
 
         if (result) {
 
-          // - queue dependencies for processing
-          stream.push(result);
 
 //          self.emit('file-done', result.filename, result);
-          // add deps to the queue -> this also queues further tasks
-          Object.keys(result.deps).map(function(rawDep) {
-            return result.deps[rawDep];
-          }).filter(function(dep) {
-            // since deps may contain references to external modules, ensure that the items start with
-            // . or /
-            return dep.charAt(0) == '/' || dep.charAt(0) == '.';
-          }).sort().forEach(function(dep) {
-            first.write(dep);
-          });
+          // CommonJS: only process file paths; for non-file paths, simply keep the
+          // dep with no processing (e.g. when resolution fails)
+          if (!opts.amd) {
+
+            // TODO:
+            // move the filters to the top - no files in the pipeline should
+            // be anything other than abspaths
+            //
+            // Same goes for AMD, no vendor files are allowed.
+
+
+            // add deps to the queue -> this also queues further tasks
+            Object.keys(result.deps).map(function(rawDep) {
+              return result.deps[rawDep];
+            }).filter(function(dep) {
+              // since deps may contain references to external modules, ensure that the items start with
+              // . or /
+              return dep.charAt(0) == '/' || dep.charAt(0) == '.';
+            }).sort().forEach(function(dep) {
+              pending++;
+              input.write(dep);
+            });
+          } else {
+            // AMD: do not process vendor files
+            Object.keys(result.deps).filter(function(dep) {
+              return !opts.vendor[dep];
+            }).map(function(rawDep) {
+              return result.deps[rawDep];
+            }).sort().forEach(function(dep) {
+              pending++;
+              input.write(dep);
+            });
+          }
+
+          // - queue dependencies for processing
+          // MUST occur after pending tasks are written
+          stream.push(result);
+
         }
-        // there is still a race condition: if first writes do not reach the task queue
-        // before the function is considered done, then queue will be empty...
-        setTimeout(function() { done(err); }, 10);
+        done(err);
       });
-    }).on('empty', function() {
-      // the queue is empty. This can only happen if 1) every task has run and 2)
-      // no task queued any further dependencies after being run - that is,
-      // we processed the last items in the tree.
-      if (inputEnded) {
-        // if the user still wants to write to the stream, do not end the pipeline yet
-        first.end();
-      }
     }),
     // end queue:
-    pi.reduce(function(acc, entry) { acc.push(entry); return acc; }, []),
+    pi.reduce(function(acc, entry) {
+      acc.push(entry);
+      completed(entry.filename);
+      return acc;
+    }, []),
 
     canonicalize(dedupe)
+
   ]);
 
-  return pi.combine(
-    // write into a disposable stream to avoid prematurely closing the processing pipeline
-    input,
-    // read from the end of the pipeline
-    pi.tail(pipeline)
-  );
-};
+  // write initial
+  initial.forEach(function(filepath) {
+    pending++;
+    input.write(filepath);
+  });
 
+  // TODO is the last thru necessary?
+
+  return input.pipe(pi.thru.obj());
+};
